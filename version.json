@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "github_repo": "msyafach/coretax-extractor",
+  "asset_name": "CoretaxExtractor.zip",
+  "check_on_startup": false,
+  "update_channel": "stable"
+}

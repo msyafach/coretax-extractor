@@ -1,0 +1,8 @@
+# Coretax Extractor Dependencies
+flet>=0.21.0
+PyMuPDF>=1.23.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Build dependencies (optional)
+pyinstaller>=6.0.0

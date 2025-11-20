@@ -1,0 +1,60 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Large files and folders (GitHub 100MB limit)
+*.zip
+upx-5.0.2-win64/
+uv.lock
+dist/
+
+# Keep essential config
+!version.json
+
+# Exclude large databases only
+coretax_data.db
+
+# Data and Output Files - Protect user data but allow examples
+# Allow example files and small samples for documentation
+input/*.pdf
+input/*.zip
+input/*.7z
+input/*.rar
+!input/example_*
+!input/sample_*
+!input/.gitkeep
+
+output/**/*.png
+output/**/*.jpg
+output/**/*.jpeg
+output/**/*.tiff
+output/**/*.bmp
+!output/example_*
+!output/sample_*
+!output/.gitkeep
+
+results/*.xlsx
+results/*.xls
+!results/example_*
+!results/sample_*
+!results/.gitkeep
+
+# Log files (but allow example logs)
+*.log
+!example*.log
+!sample*.log
+
+# IDEs and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
