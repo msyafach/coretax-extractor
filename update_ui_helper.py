@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import requests
-import flet as ft
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import urllib3
+
+# Disable warnings for unverified HTTPS requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 # ============================================================================
@@ -29,7 +34,22 @@ class UpdateChecker:
         """Initialize the update checker."""
         self.version_file = self._get_resource_path('version.json')
         self.config = self._load_version_config()
+        self.session = self._create_session()
         
+    def _create_session(self):
+        """Create a requests session with retry logic."""
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+
     def _get_resource_path(self, relative_path: str) -> str:
         """Get absolute path to resource, works for dev and PyInstaller."""
         try:
@@ -52,6 +72,16 @@ class UpdateChecker:
         """Get current application version."""
         return self.config.get('version', '0.0.0')
     
+    def _make_request(self, url: str, stream: bool = False):
+        """Make HTTP request with automatic SSL fallback."""
+        try:
+            # First try with SSL verification
+            return self.session.get(url, stream=stream, timeout=15, verify=True)
+        except requests.exceptions.SSLError:
+            print("SSL Error detected. Retrying without verification...")
+            # Fallback to no verification if SSL fails (common in corporate proxies)
+            return self.session.get(url, stream=stream, timeout=15, verify=False)
+    
     def check_for_updates(self) -> Tuple[bool, Optional[dict]]:
         """
         Check if a new version is available on GitHub.
@@ -67,7 +97,7 @@ class UpdateChecker:
             # GitHub API endpoint for latest release
             api_url = f"https://api.github.com/repos/{github_repo}/releases/latest"
             
-            response = requests.get(api_url, timeout=10)
+            response = self._make_request(api_url)
             response.raise_for_status()
             
             release_data = response.json()
@@ -136,7 +166,7 @@ class UpdateChecker:
             Path to downloaded file or None if failed
         """
         try:
-            response = requests.get(url, stream=True, timeout=30)
+            response = self._make_request(url, stream=True)
             response.raise_for_status()
             
             total_size = int(response.headers.get('content-length', 0))
@@ -182,6 +212,27 @@ class UpdateChecker:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_path)
             
+            # SAFETY: Remove database files from the update package
+            files_to_remove = ['coretax.db', 'coretax_data.db', 'version.json']
+            
+            # Check if we have a nested folder (user zipped the folder instead of contents)
+            items = os.listdir(extract_path)
+            if len(items) == 1:
+                nested_path = os.path.join(extract_path, items[0])
+                if os.path.isdir(nested_path):
+                    print(f"Detected nested folder in update: {items[0]}")
+                    extract_path = nested_path
+
+            # Remove files from the correct extract_path
+            for file in files_to_remove:
+                file_path = os.path.join(extract_path, file)
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        print(f"Removed {file} from update package")
+                    except Exception:
+                        pass
+            
             return True, extract_path
             
         except Exception as e:
@@ -201,28 +252,63 @@ class UpdateChecker:
             # Get current application directory
             if getattr(sys, 'frozen', False):
                 app_dir = os.path.dirname(sys.executable)
+                exe_name = os.path.basename(sys.executable)
             else:
                 app_dir = os.path.abspath(".")
+                exe_name = "CoretaxExtractor.exe"
             
             # Create update script
             temp_dir = tempfile.gettempdir()
             script_path = os.path.join(temp_dir, 'apply_update.bat')
             
             script_content = f"""@echo off
-echo Applying Coretax Extractor Update...
-timeout /t 2 /nobreak >nul
+title Coretax Extractor Updater
+color 0A
+echo ===================================================
+echo      Coretax Extractor Auto-Updater
+echo ===================================================
+echo.
+echo Waiting for application to close...
+timeout /t 3 /nobreak >nul
 
-echo Copying new files...
+:: Force close application if still running
+taskkill /F /IM "{exe_name}" >nul 2>&1
+
+echo.
+echo Installing update...
+echo Source: "{extract_path}"
+echo Target: "{app_dir}"
+echo.
+
+:: Copy files with retries
 xcopy /E /I /Y "{extract_path}\\*" "{app_dir}"
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Failed to copy files!
+    echo Please make sure the application is closed.
+    echo.
+    pause
+    exit /b 1
+)
 
-echo Update complete!
+echo.
+echo Update installed successfully!
+echo.
 echo Restarting application...
 timeout /t 2 /nobreak >nul
 
-start "" "{os.path.join(app_dir, 'CoretaxExtractor.exe')}"
+if exist "{os.path.join(app_dir, exe_name)}" (
+    start "" "{os.path.join(app_dir, exe_name)}"
+) else (
+    echo.
+    echo [ERROR] Could not find application to restart:
+    echo "{os.path.join(app_dir, exe_name)}"
+    echo.
+    pause
+)
 
-echo Cleaning up...
-del "%~f0"
+:: Clean up self
+(goto) 2>nul & del "%~f0"
 """
             
             with open(script_path, 'w') as f:
@@ -244,10 +330,11 @@ del "%~f0"
             True if script launched successfully
         """
         try:
-            # Launch script in detached process
+            # Launch script in NEW CONSOLE window so user can see progress
+            # and it survives app exit
             subprocess.Popen(
                 [script_path],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
                 shell=True
             )
             return True

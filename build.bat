@@ -57,7 +57,7 @@ REM Build with spec file (creates folder distribution)
 echo Membangun aplikasi...
 echo Output: Folder distribusi dengan semua dependencies
 echo.
-pyinstaller build_exe.spec --clean --noconfirm
+uv run pyinstaller --clean --noconfirm --upx-dir "C:\ocr_coretax\upx-5.0.2-win64" build_exe.spec
 echo.
 
 if exist dist\CoretaxExtractor\CoretaxExtractor.exe (
